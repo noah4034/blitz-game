@@ -1,0 +1,24 @@
+{
+  "name": "blitz-web-game",
+  "version": "1.0.0",
+  "description": "실시간 순발력 단어 연상 웹 보드게임 블리츠 (BLITZ!)",
+  "scripts": {
+    "dev": "vite --config client/vite.config.js --host 0.0.0.0 --port 3000",
+    "start": "vite --config client/vite.config.js --host 0.0.0.0 --port 3000",
+    "build": "vite build --config client/vite.config.js",
+    "preview": "vite preview --config client/vite.config.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "firebase": "^10.13.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0"
+  }
+}
