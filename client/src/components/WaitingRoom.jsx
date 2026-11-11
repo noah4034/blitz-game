@@ -7,8 +7,10 @@ export default function WaitingRoom({
   myId,
   onStartGame,
   onAddBot,
+  onKickPlayer,
   onToggleReady,
-  onUpdateOptions
+  onUpdateOptions,
+  onLeaveRoom
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -16,9 +18,9 @@ export default function WaitingRoom({
   const isHost = !!me?.isHost;
   const allReady = room.players.every((p) => p.isHost || p.isBot || p.isReady);
 
+  // 링크 전체가 아니라 6자리 숫자 코드만 복사
   const handleCopyCode = () => {
-    const inviteUrl = `${window.location.origin}/?room=${room.code}`;
-    navigator.clipboard?.writeText(inviteUrl).catch(() => {});
+    navigator.clipboard?.writeText(room.code).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -37,8 +39,17 @@ export default function WaitingRoom({
           </p>
         </div>
 
-        <div className="room-code-tag" onClick={handleCopyCode}>
-          {copied ? '✓ 초대링크 복사됨!' : `초대코드: ${room.code} 📋`}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="room-code-tag" onClick={handleCopyCode} title="클릭하여 6자리 코드 복사">
+            {copied ? '✓ 코드 복사됨!' : `초대코드: ${room.code} 📋`}
+          </div>
+          <button
+            type="button"
+            className="btn-leave-room"
+            onClick={onLeaveRoom}
+          >
+            방 나가기
+          </button>
         </div>
       </div>
 
@@ -58,6 +69,19 @@ export default function WaitingRoom({
               }}
             >
               {p.isHost && <span className="host-badge">👑 방장</span>}
+
+              {/* 방장에게만 보이는 다른 플레이어/봇 강퇴 버튼 */}
+              {isHost && p.id !== myId && (
+                <button
+                  type="button"
+                  className="btn-kick-player"
+                  onClick={() => onKickPlayer && onKickPlayer(p.id)}
+                  title={`${p.nickname} 강퇴하기`}
+                >
+                  ✕ 강퇴
+                </button>
+              )}
+
               <div className="avatar-circle">
                 {AVATAR_ICONS[idx % AVATAR_ICONS.length]}
               </div>

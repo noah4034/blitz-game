@@ -3,7 +3,12 @@ import React from 'react';
 const RANK_MEDALS = ['🥇', '🥈', '🥉', '4위', '5위', '6위'];
 
 export default function ResultModal({ players, myId, onPlayAgain, onLeaveRoom }) {
-  const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+  // 게임 도중 나간 사람(isLeft)은 무조건 맨 꼴찌에 배치하고, 나머지는 획득 카드 순으로 정렬
+  const sortedPlayers = [...(players || [])].sort((a, b) => {
+    if (a.isLeft && !b.isLeft) return 1;
+    if (!a.isLeft && b.isLeft) return -1;
+    return (b.score || 0) - (a.score || 0);
+  });
 
   return (
     <div className="result-overlay">
@@ -17,25 +22,46 @@ export default function ResultModal({ players, myId, onPlayAgain, onLeaveRoom })
         </p>
 
         <div style={{ marginBottom: '24px' }}>
-          {sortedPlayers.map((p, idx) => (
-            <div
-              key={p.id}
-              className={`rank-item ${idx === 0 ? 'first' : ''}`}
-            >
-              <span style={{ fontWeight: 800, fontSize: '16px' }}>
-                {RANK_MEDALS[idx] || `${idx + 1}위`} {p.nickname}{' '}
-                {p.id === myId ? '(나)' : ''}
-              </span>
-              <span
-                style={{
-                  fontWeight: 800,
-                  color: idx === 0 ? '#38bdf8' : '#94a3b8'
-                }}
+          {sortedPlayers.map((p, idx) => {
+            const isFirst = idx === 0 && !p.isLeft;
+            return (
+              <div
+                key={p.id}
+                className={`rank-item ${isFirst ? 'first' : ''}`}
+                style={
+                  p.isLeft
+                    ? { opacity: 0.55, borderColor: '#1e293b' }
+                    : undefined
+                }
               >
-                {p.score}장 획득
-              </span>
-            </div>
-          ))}
+                <span style={{ fontWeight: 800, fontSize: '16px' }}>
+                  {p.isLeft ? '꼴찌' : RANK_MEDALS[idx] || `${idx + 1}위`}{' '}
+                  <span
+                    style={
+                      p.isLeft
+                        ? { textDecoration: 'line-through', color: '#64748b' }
+                        : undefined
+                    }
+                  >
+                    {p.nickname}
+                  </span>{' '}
+                  {p.id === myId ? '(나)' : ''}
+                </span>
+                <span
+                  style={{
+                    fontWeight: 800,
+                    color: p.isLeft
+                      ? '#64748b'
+                      : isFirst
+                      ? '#38bdf8'
+                      : '#94a3b8'
+                  }}
+                >
+                  {p.score || 0}장 획득
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>

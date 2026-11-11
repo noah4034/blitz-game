@@ -71,12 +71,12 @@ export default function LobbyView({ onCreateRoom, onJoinRoom, errorMsg }) {
       <form onSubmit={handleJoin} style={{ display: 'flex', gap: '8px' }}>
         <input
           type="text"
+          inputMode="numeric"
           className="text-input"
-          placeholder="코드 6자리"
+          placeholder="숫자 코드 6자리"
           maxLength={6}
-          style={{ textTransform: 'uppercase' }}
           value={roomCode}
-          onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+          onChange={(e) => setRoomCode(e.target.value.replace(/[^0-9]/g, ''))}
         />
         <button
           type="submit"

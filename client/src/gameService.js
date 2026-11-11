@@ -2,7 +2,9 @@ import {
   ref,
   get,
   set,
+  remove,
   onValue,
+  onDisconnect,
   runTransaction
 } from 'firebase/database';
 import { db, getMyPlayerId } from './firebase';
@@ -187,7 +189,7 @@ export function areCardsMatching(cardA, cardB, activeWildCard) {
 }
 
 export function scanTableForDuels(players, activeWildCard) {
-  const safePlayers = players || [];
+  const safePlayers = (players || []).filter((p) => !p.isLeft);
   const matchingPairs = [];
   const participantSet = new Set();
   const opponentMap = {};
@@ -235,6 +237,21 @@ export function scanTableForDuels(players, activeWildCard) {
 }
 
 /**
+ * 다음 활성(!isLeft) 플레이어의 인덱스를 찾습니다.
+ */
+function getNextActiveTurnIndex(players, currentIndex) {
+  const total = players.length;
+  if (total === 0) return 0;
+  for (let offset = 1; offset <= total; offset++) {
+    const idx = (currentIndex + offset) % total;
+    if (!players[idx]?.isLeft) {
+      return idx;
+    }
+  }
+  return 0;
+}
+
+/**
  * Firebase에서 읽어온 방 데이터를 UI 컴포넌트가 기대하는 직렬화 형태로 정규화
  */
 export function formatRoomSnapshot(rawRoom) {
@@ -247,6 +264,7 @@ export function formatRoomSnapshot(rawRoom) {
       nickname: p.nickname,
       isHost: !!p.isHost,
       isBot: !!p.isBot,
+      isLeft: !!p.isLeft,
       isReady: !!(p.isHost || p.isBot || p.isReady),
       score: p.score || 0,
       pile,
@@ -287,26 +305,162 @@ export function formatRoomSnapshot(rawRoom) {
     currentTurnPlayerId: players[turnIndex]?.id || null,
     needsExtraDraw: !!rawRoom.needsExtraDraw,
     players,
+    presence: rawRoom.presence || {},
     duelState: rawRoom.duelState || null,
     voteState: formattedVote,
     badgeState: rawRoom.badgeState || null
   };
 }
 
+/**
+ * 숫자로만 된 6자리 방 코드 생성 (예: 482910)
+ */
 function generateRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += Math.floor(Math.random() * 10).toString();
   }
   return code;
+}
+
+/**
+ * 탭/창 닫기 시 Firebase 서버가 즉시 감지하도록 onDisconnect 등록
+ */
+export async function registerPresenceInFirebase(roomCode) {
+  const myId = getMyPlayerId();
+  if (!roomCode || !myId) return;
+  const myPresenceRef = ref(db, `rooms/${roomCode}/presence/${myId}`);
+  try {
+    await onDisconnect(myPresenceRef).remove();
+    await set(myPresenceRef, true);
+  } catch (err) {
+    console.error('Presence registration error:', err);
+  }
+}
+
+/**
+ * 방 나가기 / 강퇴 / 탭 닫기(이탈) 통합 처리
+ * - 대기실(waiting)에서는 목록에서 즉시 제거
+ * - 게임 중(playing)에는 점수를 0으로 초기화하고 isLeft: true로 마킹하여
+ *   마지막 리더보드에서 맨 꼴찌 + 취소선으로 표시되게 처리
+ */
+export async function leaveOrKickPlayerInFirebase(roomCode, targetPlayerId = null) {
+  const targetId = targetPlayerId || getMyPlayerId();
+  if (!roomCode || !targetId) return;
+
+  const roomRef = ref(db, `rooms/${roomCode}`);
+  const presenceRef = ref(db, `rooms/${roomCode}/presence/${targetId}`);
+
+  try {
+    await remove(presenceRef);
+  } catch (_) {}
+
+  await runTransaction(roomRef, (room) => {
+    if (!room) return room;
+    let players = room.players || [];
+    const targetIdx = players.findIndex((p) => p.id === targetId);
+    if (targetIdx === -1) return room;
+
+    if (room.presence && room.presence[targetId]) {
+      delete room.presence[targetId];
+    }
+
+    if (room.status === 'waiting') {
+      // 대기실에서는 플레이어 슬롯에서 완전히 제거
+      players.splice(targetIdx, 1);
+
+      const remainingHumans = players.filter((p) => !p.isBot);
+      if (remainingHumans.length === 0) {
+        // 남은 인간 플레이어가 없으면 방 삭제
+        return null;
+      }
+
+      // 방장이 나갔다면 다음 인간 플레이어에게 방장 위임
+      if (!players.some((p) => p.isHost)) {
+        remainingHumans[0].isHost = true;
+        remainingHumans[0].isReady = true;
+      }
+
+      room.players = players;
+      return room;
+    }
+
+    // 게임 진행 중(playing) 또는 결과창(ended)에서 나간 경우
+    const targetPlayer = players[targetIdx];
+    if (targetPlayer.isLeft) return room;
+
+    targetPlayer.isLeft = true;
+    targetPlayer.score = 0; // 점수 모두 삭제
+    targetPlayer.pile = []; // 보유 카드 제거
+    targetPlayer.isHost = false;
+
+    const activeHumans = players.filter((p) => !p.isBot && !p.isLeft);
+    if (activeHumans.length === 0) {
+      // 남은 인간 플레이어가 한 명도 없으면 방 삭제
+      return null;
+    }
+
+    // 방장이 나갔다면 남은 활성 인간 플레이어에게 방장 위임
+    if (!players.some((p) => p.isHost && !p.isLeft)) {
+      activeHumans[0].isHost = true;
+      activeHumans[0].isReady = true;
+    }
+
+    if (room.status === 'playing') {
+      const activePlayers = players.filter((p) => !p.isLeft);
+
+      // 남은 플레이어가 1명 이하라면 즉시 게임 종료(승리) 처리
+      if (activePlayers.length <= 1) {
+        room.status = 'ended';
+        room.duelState = null;
+        room.voteState = null;
+        room.badgeState = null;
+        room.players = players;
+        return room;
+      }
+
+      // 투표 중이었는데 나간 사람이 제출자/타겟이거나 투표 인원이 변경된 경우 정리
+      if (room.voteState) {
+        if (
+          room.voteState.submitterId === targetId ||
+          room.voteState.targetPlayerId === targetId
+        ) {
+          room.voteState = null;
+        } else {
+          const remainingVoters = activePlayers.filter(
+            (p) => p.id !== room.voteState.submitterId
+          );
+          room.voteState.totalVoters = remainingVoters.length;
+        }
+      }
+
+      // 대결 상태 재스캔
+      const updatedDuel = scanTableForDuels(players, room.activeWildCard);
+      room.duelState = updatedDuel;
+
+      // 나간 사람의 턴이었다면 다음 활성 플레이어로 턴 이동
+      if (room.turnIndex === targetIdx || players[room.turnIndex]?.isLeft) {
+        room.needsExtraDraw = false;
+        room.turnIndex = getNextActiveTurnIndex(players, targetIdx);
+      }
+    }
+
+    room.players = players;
+    return room;
+  });
 }
 
 // 1. 방 만들기
 export async function createRoomInFirebase({ nickname, penaltySeconds = 1 }) {
   const myId = getMyPlayerId();
   const cleanName = (nickname || '플레이어1').trim().slice(0, 12);
-  const code = generateRoomCode();
+  let code = generateRoomCode();
+
+  // 중복 코드 방지 확인
+  const existingSnap = await get(ref(db, `rooms/${code}`));
+  if (existingSnap.exists()) {
+    code = generateRoomCode();
+  }
 
   const roomData = {
     code,
@@ -319,12 +473,16 @@ export async function createRoomInFirebase({ nickname, penaltySeconds = 1 }) {
     activeWildCard: null,
     turnIndex: 0,
     needsExtraDraw: false,
+    presence: {
+      [myId]: true
+    },
     players: [
       {
         id: myId,
         nickname: cleanName,
         isHost: true,
         isBot: false,
+        isLeft: false,
         isReady: true,
         score: 0,
         pile: [],
@@ -337,13 +495,14 @@ export async function createRoomInFirebase({ nickname, penaltySeconds = 1 }) {
   };
 
   await set(ref(db, `rooms/${code}`), roomData);
+  await registerPresenceInFirebase(code);
   return { ok: true, roomCode: code };
 }
 
 // 2. 방 입장하기
 export async function joinRoomInFirebase({ roomCode, nickname }) {
   const myId = getMyPlayerId();
-  const code = (roomCode || '').trim().toUpperCase();
+  const code = (roomCode || '').trim();
   const roomRef = ref(db, `rooms/${code}`);
 
   const snap = await get(roomRef);
@@ -356,12 +515,13 @@ export async function joinRoomInFirebase({ roomCode, nickname }) {
     if (!room) return room;
     const players = room.players || [];
 
-    // 이미 방에 들어가 있는 경우 닉네임만 갱신 후 재입장 허용
-    const existing = players.find((p) => p.id === myId);
+    const existing = players.find((p) => p.id === myId && !p.isLeft);
     if (existing) {
       if (nickname && nickname.trim()) {
         existing.nickname = nickname.trim().slice(0, 12);
       }
+      if (!room.presence) room.presence = {};
+      room.presence[myId] = true;
       return room;
     }
 
@@ -380,18 +540,22 @@ export async function joinRoomInFirebase({ roomCode, nickname }) {
       nickname: cleanName,
       isHost: false,
       isBot: false,
+      isLeft: false,
       isReady: false,
       score: 0,
       pile: [],
       cooldownUntil: 0
     });
     room.players = players;
+    if (!room.presence) room.presence = {};
+    room.presence[myId] = true;
     return room;
   });
 
   if (errorReason) {
     return { ok: false, message: errorReason };
   }
+  await registerPresenceInFirebase(code);
   return { ok: true, roomCode: code };
 }
 
@@ -414,6 +578,7 @@ export async function addBotInFirebase(roomCode) {
       nickname: botName,
       isHost: false,
       isBot: true,
+      isLeft: false,
       isReady: true,
       score: 0,
       pile: [],
@@ -461,7 +626,7 @@ export async function startGameInFirebase(roomCode) {
 
   await runTransaction(roomRef, (room) => {
     if (!room) return room;
-    const players = room.players || [];
+    const players = (room.players || []).filter((p) => !p.isLeft);
     const me = players.find((p) => p.id === myId);
     if (!me || !me.isHost) return room;
 
@@ -486,6 +651,7 @@ export async function startGameInFirebase(roomCode) {
 
     room.players = players.map((p) => ({
       ...p,
+      isLeft: false,
       score: 0,
       pile: [],
       cooldownUntil: 0
@@ -510,7 +676,7 @@ export async function drawCardInFirebase(roomCode, overridePlayerId = null) {
     const players = room.players || [];
     const turnIdx = room.turnIndex || 0;
     const currentPlayer = players[turnIdx];
-    if (!currentPlayer || currentPlayer.id !== actorId) return room;
+    if (!currentPlayer || currentPlayer.id !== actorId || currentPlayer.isLeft) return room;
 
     const deck = room.deck || [];
     if (deck.length === 0) {
@@ -545,7 +711,7 @@ export async function drawCardInFirebase(roomCode, overridePlayerId = null) {
     } else if (deck.length === 0) {
       room.status = 'ended';
     } else {
-      room.turnIndex = (turnIdx + 1) % players.length;
+      room.turnIndex = getNextActiveTurnIndex(players, turnIdx);
     }
 
     return room;
@@ -565,7 +731,7 @@ export async function completeBadgePhaseInFirebase(roomCode, expectedBadgeId) {
     room.badgeState = null;
 
     if (bs.approved) {
-      const winner = players.find((p) => p.id === bs.submitterId);
+      const winner = players.find((p) => p.id === bs.submitterId && !p.isLeft);
       if (winner) {
         winner.score = (winner.score || 0) + 1;
       }
@@ -585,8 +751,9 @@ export async function completeBadgePhaseInFirebase(roomCode, expectedBadgeId) {
         return room;
       }
 
-      if (!room.needsExtraDraw) {
-        room.turnIndex = ((room.turnIndex || 0) + 1) % players.length;
+      if (!room.needsExtraDraw || players[room.turnIndex || 0]?.isLeft) {
+        room.needsExtraDraw = false;
+        room.turnIndex = getNextActiveTurnIndex(players, room.turnIndex || 0);
       }
       return room;
     } else {
@@ -621,7 +788,7 @@ export async function submitAnswerInFirebase(roomCode, { word, targetPlayerId })
     if (!participants.includes(myId)) return room;
 
     const players = room.players || [];
-    const submitter = players.find((p) => p.id === myId);
+    const submitter = players.find((p) => p.id === myId && !p.isLeft);
     if (!submitter) return room;
 
     if (submitter.cooldownUntil && Date.now() < submitter.cooldownUntil) {
@@ -660,9 +827,8 @@ export async function submitAnswerInFirebase(roomCode, { word, targetPlayerId })
     // 2단계: 사전에 없는 단어는 5초 실시간 투표 시작
     const targetOpp =
       opponents.find((o) => o.playerId === targetPlayerId) || opponents[0];
-    const eligibleVoters = players.filter((p) => p.id !== submitter.id);
+    const eligibleVoters = players.filter((p) => !p.isLeft && p.id !== submitter.id);
 
-    // 봇이 방에 있다면 봇들의 찬성표를 미리 반영하거나 클라이언트 타이머가 처리하도록 구성
     const initialVotes = {};
     eligibleVoters.forEach((v) => {
       if (v.isBot) {
@@ -786,7 +952,7 @@ export async function castVoteInFirebase(roomCode, choice) {
   }
 }
 
-// 10. 대기실로 돌아가기 (한 판 더 하기)
+// 10. 대기실로 돌아가기 (한 판 더 하기 - 중도 퇴장자 목록에서 정리)
 export async function backToWaitingInFirebase(roomCode) {
   const roomRef = ref(db, `rooms/${roomCode}`);
   await runTransaction(roomRef, (room) => {
@@ -796,13 +962,17 @@ export async function backToWaitingInFirebase(roomCode) {
     room.voteState = null;
     room.badgeState = null;
     room.activeWildCard = null;
-    room.players = (room.players || []).map((p) => ({
-      ...p,
-      score: 0,
-      pile: [],
-      cooldownUntil: 0,
-      isReady: !!(p.isHost || p.isBot)
-    }));
+    room.turnIndex = 0;
+    room.players = (room.players || [])
+      .filter((p) => !p.isLeft)
+      .map((p) => ({
+        ...p,
+        isLeft: false,
+        score: 0,
+        pile: [],
+        cooldownUntil: 0,
+        isReady: !!(p.isHost || p.isBot)
+      }));
     return room;
   });
 }

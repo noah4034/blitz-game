@@ -13,7 +13,8 @@ import {
   submitAnswerInFirebase,
   castVoteInFirebase,
   finalizeVoteInFirebase,
-  backToWaitingInFirebase
+  backToWaitingInFirebase,
+  leaveOrKickPlayerInFirebase
 } from './gameService';
 import LobbyView from './components/LobbyView';
 import WaitingRoom from './components/WaitingRoom';
@@ -26,7 +27,7 @@ export default function App() {
   const [room, setRoom] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Firebase 실시간 방 구독
+  // Firebase 실시간 방 구독 및 강퇴/연결 끊김 감지
   useEffect(() => {
     if (!activeRoomCode) {
       setRawRoom(null);
@@ -37,12 +38,54 @@ export default function App() {
     const roomRef = ref(db, `rooms/${activeRoomCode}`);
     const unsubscribe = onValue(roomRef, (snapshot) => {
       const data = snapshot.val();
+      if (!data) {
+        setActiveRoomCode(null);
+        setRawRoom(null);
+        setRoom(null);
+        return;
+      }
+
+      const players = data.players || [];
+      const me = players.find((p) => p.id === myId);
+
+      // 내가 강퇴되었거나 퇴장 처리된 경우 로비로 이동
+      if (!me || me.isLeft) {
+        setActiveRoomCode(null);
+        setRawRoom(null);
+        setRoom(null);
+        return;
+      }
+
+      // 다른 플레이어가 탭/창을 닫아 presence가 끊긴 경우 즉시 퇴장 처리
+      const presence = data.presence || {};
+      players.forEach((p) => {
+        if (!p.isBot && !p.isLeft && p.id !== myId && !presence[p.id]) {
+          leaveOrKickPlayerInFirebase(data.code, p.id);
+        }
+      });
+
       setRawRoom(data);
       setRoom(formatRoomSnapshot(data));
     });
 
     return () => unsubscribe();
-  }, [activeRoomCode]);
+  }, [activeRoomCode, myId]);
+
+  // 브라우저 탭/창 닫기 시 즉시 방 나가기 처리
+  useEffect(() => {
+    if (!activeRoomCode) return;
+
+    const handleUnload = () => {
+      leaveOrKickPlayerInFirebase(activeRoomCode, myId);
+    };
+
+    window.addEventListener('pagehide', handleUnload);
+    window.addEventListener('beforeunload', handleUnload);
+    return () => {
+      window.removeEventListener('pagehide', handleUnload);
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [activeRoomCode, myId]);
 
   // 5초 투표 타이머 실시간 카운트다운 및 만료 시 자동 집계
   useEffect(() => {
@@ -53,7 +96,6 @@ export default function App() {
     const votedCount = Object.keys(rawRoom.voteState.votes || {}).length;
     const totalVoters = rawRoom.voteState.totalVoters || 0;
 
-    // 봇들만 있어서 이미 전원 투표가 완료된 경우 0.7초 뒤 바로 종료
     if (totalVoters > 0 && votedCount >= totalVoters) {
       const t = setTimeout(() => {
         finalizeVoteInFirebase(rawRoom.code, voteId);
@@ -79,11 +121,11 @@ export default function App() {
     if (!room || room.status !== 'playing') return;
     if (room.duelState || room.voteState || room.badgeState) return;
 
-    const me = room.players.find((p) => p.id === myId);
+    const me = room.players.find((p) => p.id === myId && !p.isLeft);
     if (!me?.isHost) return;
 
     const currentPlayer = room.players[room.turnIndex];
-    if (currentPlayer && currentPlayer.isBot) {
+    if (currentPlayer && currentPlayer.isBot && !currentPlayer.isLeft) {
       const timer = setTimeout(() => {
         drawCardInFirebase(room.code, currentPlayer.id);
       }, 1100);
@@ -133,6 +175,14 @@ export default function App() {
     addBotInFirebase(activeRoomCode);
   }, [activeRoomCode]);
 
+  const handleKickPlayer = useCallback(
+    (targetPlayerId) => {
+      if (!activeRoomCode) return;
+      leaveOrKickPlayerInFirebase(activeRoomCode, targetPlayerId);
+    },
+    [activeRoomCode]
+  );
+
   const handleToggleReady = useCallback(() => {
     if (!activeRoomCode) return;
     toggleReadyInFirebase(activeRoomCode);
@@ -180,10 +230,14 @@ export default function App() {
     backToWaitingInFirebase(activeRoomCode);
   }, [activeRoomCode]);
 
-  const handleLeaveRoom = useCallback(() => {
+  const handleLeaveRoom = useCallback(async () => {
+    const codeToLeave = activeRoomCode;
     setActiveRoomCode(null);
     window.history.replaceState({}, '', '/');
-  }, []);
+    if (codeToLeave) {
+      await leaveOrKickPlayerInFirebase(codeToLeave, myId);
+    }
+  }, [activeRoomCode, myId]);
 
   return (
     <div className="app-wrapper">
@@ -199,8 +253,10 @@ export default function App() {
           myId={myId}
           onStartGame={handleStartGame}
           onAddBot={handleAddBot}
+          onKickPlayer={handleKickPlayer}
           onToggleReady={handleToggleReady}
           onUpdateOptions={handleUpdateOptions}
+          onLeaveRoom={handleLeaveRoom}
         />
       ) : (
         <GameTableView

@@ -9,11 +9,12 @@ import ResultModal from './ResultModal';
  * 상단/하단은 가로형(horizontal), 좌/우는 세로형(vertical) 카드를 사용합니다.
  */
 function getSeatLayout(players, myId) {
-  const myIdx = players.findIndex((p) => p.id === myId);
+  const activePlayers = (players || []).filter((p) => !p.isLeft);
+  const myIdx = activePlayers.findIndex((p) => p.id === myId);
   const ordered =
     myIdx >= 0
-      ? [...players.slice(myIdx), ...players.slice(0, myIdx)]
-      : [...players];
+      ? [...activePlayers.slice(myIdx), ...activePlayers.slice(0, myIdx)]
+      : [...activePlayers];
 
   const total = ordered.length;
   const seatPresets = {
@@ -71,6 +72,7 @@ export default function GameTableView({
   const [selectedTargetId, setSelectedTargetId] = useState(null);
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [flyingCardAnim, setFlyingCardAnim] = useState(null);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
   const inputRef = useRef(null);
   const tableRef = useRef(null);
   const seatRefs = useRef({});
@@ -203,8 +205,16 @@ export default function GameTableView({
 
   return (
     <div className="table-container" ref={tableRef}>
-      {/* 좌측 상단 상태 바 */}
+      {/* 좌측 상단 상태 바 & 나가기 버튼 */}
       <div className="top-status-bar">
+        <button
+          type="button"
+          className="btn-ingame-leave"
+          onClick={() => setShowLeaveModal(true)}
+        >
+          나가기
+        </button>
+        <span>•</span>
         <span>
           방 코드: <strong className="status-highlight">{room.code}</strong>
         </span>
@@ -416,6 +426,40 @@ export default function GameTableView({
           onPlayAgain={onPlayAgain}
           onLeaveRoom={onLeaveRoom}
         />
+      )}
+
+      {/* 인게임 나가기 경고 확인 모달 */}
+      {showLeaveModal && (
+        <div className="leave-modal-overlay">
+          <div className="leave-modal">
+            <div style={{ fontSize: '36px', marginBottom: '12px' }}>⚠️</div>
+            <h3 style={{ fontSize: '19px', fontWeight: 800, marginBottom: '24px', lineHeight: 1.4 }}>
+              점수가 모두 삭제됩니다.
+              <br />
+              나가시겠습니까?
+            </h3>
+            <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowLeaveModal(false)}
+              >
+                아니오
+              </button>
+              <button
+                type="button"
+                className="btn"
+                style={{ background: '#C92A2A', color: '#fff' }}
+                onClick={() => {
+                  setShowLeaveModal(false);
+                  onLeaveRoom();
+                }}
+              >
+                예
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

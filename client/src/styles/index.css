@@ -843,3 +843,84 @@ body {
   border-color: #F59F00;
   background: rgba(245, 159, 0, 0.1);
 }
+
+/* =========================================
+   7. 대기실 강퇴/나가기 & 인게임 나가기/모달
+   ========================================= */
+.btn-leave-room {
+  background: #222C3C;
+  color: #cbd5e1;
+  border: 1px solid #334155;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-leave-room:hover {
+  background: #C92A2A;
+  color: #FFFFFF;
+  border-color: #FF6B6B;
+}
+
+.btn-kick-player {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(201, 42, 42, 0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-kick-player:hover {
+  background: #C92A2A;
+  color: #FFFFFF;
+  border-color: #FF6B6B;
+}
+
+.btn-ingame-leave {
+  background: rgba(34, 44, 60, 0.9);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-ingame-leave:hover {
+  background: #C92A2A;
+  color: #FFFFFF;
+  border-color: #FF6B6B;
+  box-shadow: 0 0 12px rgba(201, 42, 42, 0.6);
+}
+
+.leave-modal-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 600;
+}
+
+.leave-modal {
+  background: #1E293B;
+  border: 2px solid #C92A2A;
+  border-radius: 24px;
+  padding: 32px;
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
+  animation: modalPop 0.2s ease-out;
+}
