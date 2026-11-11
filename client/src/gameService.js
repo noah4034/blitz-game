@@ -525,17 +525,11 @@ export async function leaveOrKickPlayerInFirebase(roomCode, targetPlayerId = nul
   });
 }
 
-// 1. 방 만들기
+// 1. 방 만들기 (즉시 대기실 진입하도록 왕복 통신 최소화)
 export async function createRoomInFirebase({ nickname, penaltySeconds = 1, botDifficulty = 'normal' }) {
   const myId = getMyPlayerId();
   const cleanName = (nickname || '플레이어1').trim().slice(0, 12);
-  let code = generateRoomCode();
-
-  // 중복 코드 방지 확인
-  const existingSnap = await get(ref(db, `rooms/${code}`));
-  if (existingSnap.exists()) {
-    code = generateRoomCode();
-  }
+  const code = generateRoomCode();
 
   const roomData = {
     code,
@@ -570,9 +564,10 @@ export async function createRoomInFirebase({ nickname, penaltySeconds = 1, botDi
     badgeState: null
   };
 
-  await set(ref(db, `rooms/${code}`), roomData);
-  await registerPresenceInFirebase(code);
-  return { ok: true, roomCode: code };
+  set(ref(db, `rooms/${code}`), roomData).then(() => {
+    registerPresenceInFirebase(code);
+  });
+  return { ok: true, roomCode: code, initialRoomData: roomData };
 }
 
 // 2. 방 입장하기

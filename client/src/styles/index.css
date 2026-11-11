@@ -464,6 +464,7 @@ body {
 }
 
 .deck-area {
+  width: 156px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -477,6 +478,7 @@ body {
   font-weight: 700;
   padding: 6px 14px;
   border-radius: 999px;
+  white-space: nowrap;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
   animation: bounce 1.8s infinite;
 }

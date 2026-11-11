@@ -74,6 +74,7 @@ export default function GameTableView({
   const [flyingCardAnim, setFlyingCardAnim] = useState(null);
   const [drawCardAnim, setDrawCardAnim] = useState(null);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [hasDrawnOnce, setHasDrawnOnce] = useState(false);
   const inputRef = useRef(null);
   const tableRef = useRef(null);
   const deckRef = useRef(null);
@@ -94,6 +95,17 @@ export default function GameTableView({
   const myOpponents =
     (amIInDuel && room.duelState.opponentMap?.[myId]) || [];
   const duelSignature = room.duelState ? JSON.stringify(room.duelState) : '';
+
+  // 새 게임 시작 시 첫 턴 힌트 표시 상태 초기화 및 첫 카드 뽑기 완료 감지
+  useEffect(() => {
+    if (!room.lastDraw && room.deckCount >= 70) {
+      setHasDrawnOnce(false);
+      return;
+    }
+    if ((me?.pileCount || 0) > 0) {
+      setHasDrawnOnce(true);
+    }
+  }, [room.lastDraw, room.deckCount, me?.pileCount]);
 
   // 대결 상대 선택 기본값 유지
   useEffect(() => {
@@ -326,9 +338,9 @@ export default function GameTableView({
           {!isDuelActive ? (
             <div className={`turn-guide-pill ${isMyTurn ? '' : 'waiting'}`}>
               {isMyTurn
-                ? room.needsExtraDraw
-                  ? '와일드카드 오픈! 한 장 더 뽑으세요 [SPACE]'
-                  : '내 차례! 스페이스바 또는 클릭 [SPACE]'
+                ? !hasDrawnOnce
+                  ? '내 차례! 스페이스바 또는 클릭 [SPACE]'
+                  : '내 차례!'
                 : `${currentTurnPlayer?.nickname}님 차례`}
             </div>
           ) : (

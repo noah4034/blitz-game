@@ -31,10 +31,13 @@ export default function App() {
   const [room, setRoom] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // 로비 진입 시 DB에 남아있는 유령 방(접속자 0명 방) 자동 청소
+  // 로비 진입 후 3초 뒤 백그라운드에서 유령 방(접속자 0명 방) 자동 청소 (방 생성 속도에 영향 없도록 지연)
   useEffect(() => {
     if (!activeRoomCode) {
-      cleanupStaleRoomsInFirebase();
+      const timer = setTimeout(() => {
+        cleanupStaleRoomsInFirebase();
+      }, 3000);
+      return () => clearTimeout(timer);
     }
   }, [activeRoomCode]);
 
@@ -244,6 +247,10 @@ export default function App() {
     try {
       const res = await createRoomInFirebase({ nickname, penaltySeconds });
       if (res.ok) {
+        if (res.initialRoomData) {
+          setRawRoom(res.initialRoomData);
+          setRoom(formatRoomSnapshot(res.initialRoomData));
+        }
         setActiveRoomCode(res.roomCode);
       } else {
         setErrorMsg(res.message || '방 생성에 실패했습니다.');

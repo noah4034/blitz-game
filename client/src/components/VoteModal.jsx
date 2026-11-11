@@ -33,10 +33,23 @@ export default function VoteModal({ voteState, badgeState, myId, onCastVote }) {
               </span>
             </div>
 
-            <div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+              <div
+                style={{
+                  background: 'rgba(245, 159, 0, 0.16)',
+                  border: '1.5px solid #F59F00',
+                  color: '#F59F00',
+                  padding: '6px 16px',
+                  borderRadius: '999px',
+                  fontSize: '16px',
+                  fontWeight: 800
+                }}
+              >
+                주제어: {voteState.category}
+              </div>
               <div className="vote-word-display">{voteState.word}</div>
               <div className="vote-subtext">
-                [{voteState.category}] {voteState.submitterNickname}님이 제출한 단어입니다
+                {voteState.submitterNickname}님이 제출한 단어입니다
               </div>
             </div>
 
