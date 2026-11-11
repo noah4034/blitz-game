@@ -25,6 +25,16 @@ export const COLOR_SETS = [
 // 메모리 사전 캐시 (기본 words_master.json + Firebase에서 실시간 승격된 단어들)
 const masterSets = new Map();
 
+// 기기 간 시계 오차(Clock Skew) 보정을 위한 Firebase 서버 시간 오프셋
+let serverTimeOffset = 0;
+onValue(ref(db, '.info/serverTimeOffset'), (snap) => {
+  serverTimeOffset = Number(snap.val()) || 0;
+});
+
+export function getServerNow() {
+  return Date.now() + serverTimeOffset;
+}
+
 export function normalizeWord(word) {
   if (!word || typeof word !== 'string') return '';
   return word.replace(/\s+/g, '').toLowerCase().trim();
@@ -280,7 +290,9 @@ export function formatRoomSnapshot(rawRoom) {
       pile,
       pileCount: pile.length,
       topCard: pile.length > 0 ? pile[pile.length - 1] : null,
-      cooldownUntil: p.cooldownUntil || 0
+      cooldownUntil: p.cooldownUntil || 0,
+      cooldownId: p.cooldownId || null,
+      cooldownSeconds: Number(p.cooldownSeconds) || 0
     };
   });
 
@@ -292,8 +304,8 @@ export function formatRoomSnapshot(rawRoom) {
     const votes = vs.votes || {};
     const votedCount = Object.keys(votes).length;
     const secondsLeft = vs.expiresAt
-      ? Math.max(0, Math.ceil((vs.expiresAt - Date.now()) / 1000))
-      : 5;
+      ? Math.min(7, Math.max(0, Math.ceil((vs.expiresAt - getServerNow()) / 1000)))
+      : 7;
 
     formattedVote = {
       ...vs,
@@ -503,9 +515,13 @@ export async function leaveOrKickPlayerInFirebase(roomCode, targetPlayerId = nul
           room.voteState = null;
         } else {
           const remainingVoters = activePlayers.filter(
-            (p) => p.id !== room.voteState.submitterId
+            (p) => !p.isBot && p.id !== room.voteState.submitterId
           );
-          room.voteState.totalVoters = remainingVoters.length;
+          if (remainingVoters.length === 0) {
+            room.voteState = null;
+          } else {
+            room.voteState.totalVoters = remainingVoters.length;
+          }
         }
       }
 
@@ -753,7 +769,9 @@ export async function startGameInFirebase(roomCode) {
       isLeft: false,
       score: 0,
       pile: [],
-      cooldownUntil: 0
+      cooldownUntil: 0,
+      cooldownId: null,
+      cooldownSeconds: 0
     }));
 
     return room;
@@ -853,6 +871,12 @@ export async function completeBadgePhaseInFirebase(roomCode, expectedBadgeId) {
       if (winner) {
         winner.score = (winner.score || 0) + 1;
       }
+      // 대결이 끝났으므로 이전 오답 페널티 쿨타임 초기화
+      players.forEach((p) => {
+        p.cooldownUntil = 0;
+        p.cooldownId = null;
+        p.cooldownSeconds = 0;
+      });
       room.players = players;
 
       // 패자의 아래 카드가 드러났으므로 즉시 연쇄(캐스케이드) 대결 스캔
@@ -880,7 +904,9 @@ export async function completeBadgePhaseInFirebase(roomCode, expectedBadgeId) {
       if (penaltySec > 0) {
         const submitter = players.find((p) => p.id === bs.submitterId);
         if (submitter) {
-          submitter.cooldownUntil = Date.now() + penaltySec * 1000;
+          submitter.cooldownId = bs.id;
+          submitter.cooldownSeconds = penaltySec;
+          submitter.cooldownUntil = getServerNow() + penaltySec * 1000;
         }
         room.players = players;
       }
@@ -911,10 +937,6 @@ export async function submitAnswerInFirebase(
     const players = room.players || [];
     const submitter = players.find((p) => p.id === actorId && !p.isLeft);
     if (!submitter) return room;
-
-    if (submitter.cooldownUntil && Date.now() < submitter.cooldownUntil) {
-      return room;
-    }
 
     const opponents = room.duelState.opponentMap?.[actorId] || [];
     if (opponents.length === 0) return room;
@@ -952,18 +974,32 @@ export async function submitAnswerInFirebase(
       }
     }
 
-    // 2단계: 사전에 없는 단어는 5초 실시간 투표 시작
     const targetOpp =
       opponents.find((o) => o.playerId === targetPlayerId) || opponents[0];
-    const eligibleVoters = players.filter((p) => !p.isLeft && p.id !== submitter.id);
 
-    const initialVotes = {};
-    eligibleVoters.forEach((v) => {
-      if (v.isBot) {
-        initialVotes[v.id] = true;
-      }
-    });
+    // 투표 가능한 다른 인간 플레이어 목록 (봇 제외)
+    const eligibleVoters = players.filter(
+      (p) => !p.isLeft && !p.isBot && p.id !== submitter.id
+    );
 
+    // 혼자 봇들과 연습 중일 때는 투표할 다른 사람이 없으므로 사전에 없는 단어는 즉시 노인정 처리
+    if (eligibleVoters.length === 0) {
+      const badgeId = `badge_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      triggeredBadgeId = badgeId;
+      room.badgeState = {
+        id: badgeId,
+        approved: false,
+        word: cleanWord,
+        submitterId: submitter.id,
+        submitterNickname: submitter.nickname,
+        targetPlayerId: targetOpp.playerId,
+        category: targetOpp.category,
+        capturedCard: null
+      };
+      return room;
+    }
+
+    // 2단계: 다른 인간 플레이어가 있는 경우 7초 실시간 투표 시작
     room.voteState = {
       id: `vote_${Date.now()}`,
       word: cleanWord,
@@ -973,8 +1009,8 @@ export async function submitAnswerInFirebase(
       targetPlayerId: targetOpp.playerId,
       targetNickname: targetOpp.nickname,
       totalVoters: eligibleVoters.length,
-      expiresAt: Date.now() + 5000,
-      votes: initialVotes
+      expiresAt: getServerNow() + 7000,
+      votes: {}
     };
 
     return room;
@@ -1002,8 +1038,11 @@ export async function finalizeVoteInFirebase(roomCode, expectedVoteId = null) {
     const voteValues = Object.values(votes);
     const yesCount = voteValues.filter((v) => v === true).length;
     const noCount = voteValues.filter((v) => v === false).length;
+    const totalVoters = Number(vs.totalVoters) || 0;
 
-    const isApproved = voteValues.length === 0 ? true : yesCount > noCount;
+    // 전체 투표 대상자의 과반수가 찬성(O)하지 않았거나 타임아웃 시 노인정 처리
+    const isApproved =
+      totalVoters > 0 && yesCount > totalVoters / 2 && yesCount > noCount;
     const players = room.players || [];
     const loser = players.find((p) => p.id === vs.targetPlayerId);
 

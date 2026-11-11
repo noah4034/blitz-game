@@ -14,11 +14,13 @@ import {
   submitAnswerInFirebase,
   castVoteInFirebase,
   finalizeVoteInFirebase,
+  completeBadgePhaseInFirebase,
   backToWaitingInFirebase,
   leaveOrKickPlayerInFirebase,
   cleanupStaleRoomsInFirebase,
   syncLastHumanDisconnectHook,
-  getRandomMasterWord
+  getRandomMasterWord,
+  getServerNow
 } from './gameService';
 import LobbyView from './components/LobbyView';
 import WaitingRoom from './components/WaitingRoom';
@@ -149,7 +151,7 @@ export default function App() {
     }
 
     const interval = setInterval(() => {
-      const now = Date.now();
+      const now = getServerNow();
       setRoom(formatRoomSnapshot(rawRoom));
 
       if (expiresAt && now >= expiresAt) {
@@ -160,6 +162,16 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [rawRoom]);
+
+  // 1초 인정/노인정 배지 노출 후 안전 종료 타이머 (특정 클라이언트 지연/이탈 시에도 배지가 멈추지 않도록 보장)
+  useEffect(() => {
+    if (!rawRoom?.badgeState) return;
+    const badgeId = rawRoom.badgeState.id;
+    const timer = setTimeout(() => {
+      completeBadgePhaseInFirebase(rawRoom.code, badgeId);
+    }, 1050);
+    return () => clearTimeout(timer);
+  }, [rawRoom?.code, rawRoom?.badgeState?.id]);
 
   // 봇 턴일 때 방장 클라이언트가 1.1초 후 자동으로 봇 카드 뽑기 실행
   useEffect(() => {

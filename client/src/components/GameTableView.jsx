@@ -82,6 +82,7 @@ export default function GameTableView({
   const seatRefs = useRef({});
   const seatCardRefs = useRef({});
   const lastDrawIdRef = useRef(room.lastDraw?.id || null);
+  const lastCooldownIdRef = useRef(null);
 
   const isMyTurn = room.currentTurnPlayerId === myId;
   const currentTurnPlayer = room.players.find(
@@ -121,12 +122,21 @@ export default function GameTableView({
   // 대결 시작, 연쇄 대결 전환, 투표/배지 전환 시마다 입력창을 항상 빈칸으로 초기화 후 자동 포커스
   useEffect(() => {
     setAnswerText('');
-    if (amIInDuel && !room.voteState && !room.badgeState) {
+    if (amIInDuel && !room.voteState && !room.badgeState && cooldownLeft === 0) {
       setTimeout(() => {
         inputRef.current?.focus();
       }, 30);
     }
   }, [amIInDuel, duelSignature, room.voteState?.id, room.badgeState?.id]);
+
+  // 오답 페널티 쿨타임이 0초로 해제되는 즉시 입력창에 다시 자동 포커스
+  useEffect(() => {
+    if (amIInDuel && !room.voteState && !room.badgeState && cooldownLeft === 0) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 20);
+    }
+  }, [cooldownLeft, amIInDuel, room.voteState, room.badgeState]);
 
   // 덱에서 플레이어 더미 또는 와일드카드 더미로 카드가 이동하는 애니메이션
   useEffect(() => {
@@ -239,20 +249,38 @@ export default function GameTableView({
     return () => cancelAnimationFrame(rafId);
   }, [room.badgeState?.id]);
 
-  // 오답 페널티 쿨타임 타이머 계산
+  // 오답 페널티 쿨타임 타이머 계산 (기기 간 시계 오차 영향을 받지 않도록 내 기기 타이머로 정확히 카운트다운)
   useEffect(() => {
-    if (!me?.cooldownUntil) {
+    if (!amIInDuel || !me?.cooldownId || !me?.cooldownSeconds) {
+      lastCooldownIdRef.current = me?.cooldownId || null;
       setCooldownLeft(0);
       return;
     }
-    const updateCooldown = () => {
-      const diff = Math.ceil((me.cooldownUntil - Date.now()) / 1000);
-      setCooldownLeft(diff > 0 ? diff : 0);
-    };
-    updateCooldown();
-    const timer = setInterval(updateCooldown, 200);
+
+    if (lastCooldownIdRef.current === me.cooldownId) return;
+    lastCooldownIdRef.current = me.cooldownId;
+
+    const penaltySec = Number(me.cooldownSeconds) || 0;
+    if (penaltySec <= 0) {
+      setCooldownLeft(0);
+      return;
+    }
+
+    const localEnd = Date.now() + penaltySec * 1000;
+    setCooldownLeft(penaltySec);
+
+    const timer = setInterval(() => {
+      const diff = Math.ceil((localEnd - Date.now()) / 1000);
+      if (diff <= 0) {
+        setCooldownLeft(0);
+        clearInterval(timer);
+      } else {
+        setCooldownLeft(diff);
+      }
+    }, 100);
+
     return () => clearInterval(timer);
-  }, [me?.cooldownUntil]);
+  }, [amIInDuel, me?.cooldownId, me?.cooldownSeconds]);
 
   // 스페이스바 카드 뒤집기 단축키
   useEffect(() => {
