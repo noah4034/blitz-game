@@ -136,12 +136,13 @@ function shuffleArray(arr) {
 }
 
 /**
- * 플레이어 인원수 + 2개(최대 6개)의 색상을 선택하여
+ * 플레이어 인원수 + 2개(4~6인은 6개 색상 전부 사용)의 색상을 선택하여
  * 67개 주제어 카드와 8장의 2색 연결 와일드카드를 동적 생성
  */
 export function createDynamicDeck(playerCount = 4, wildCardCount = 8) {
   const categories = shuffleArray(getCategories());
-  const colorCount = Math.min(COLOR_SETS.length, Math.max(3, Number(playerCount) + 2));
+  const pCount = Number(playerCount) || 4;
+  const colorCount = pCount >= 4 ? 6 : Math.min(COLOR_SETS.length, Math.max(3, pCount + 2));
   const activeColors = shuffleArray(COLOR_SETS).slice(0, colorCount);
 
   const normalCards = shuffleArray(
@@ -174,8 +175,9 @@ export function createDynamicDeck(playerCount = 4, wildCardCount = 8) {
     };
   });
 
-  const firstCards = normalCards.slice(0, 4);
-  const restDeck = shuffleArray([...normalCards.slice(4), ...wildCards]);
+  const safeFirstCount = Math.min(normalCards.length, Math.max(4, pCount));
+  const firstCards = normalCards.slice(0, safeFirstCount);
+  const restDeck = shuffleArray([...normalCards.slice(safeFirstCount), ...wildCards]);
   return [...firstCards, ...restDeck];
 }
 

@@ -43,11 +43,11 @@ function getSeatLayout(players, myId) {
     ],
     6: [
       { pos: 'seat-bottom', orientation: 'horizontal' },
-      { pos: 'seat-left', orientation: 'vertical' },
+      { pos: 'seat-bottom-left', orientation: 'horizontal' },
       { pos: 'seat-top-left', orientation: 'horizontal' },
       { pos: 'seat-top', orientation: 'horizontal' },
       { pos: 'seat-top-right', orientation: 'horizontal' },
-      { pos: 'seat-right', orientation: 'vertical' }
+      { pos: 'seat-bottom-right', orientation: 'horizontal' }
     ]
   };
 

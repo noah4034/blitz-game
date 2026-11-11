@@ -26,7 +26,7 @@ export default function WaitingRoom({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const emptySlotCount = Math.max(0, 4 - room.players.length);
+  const emptySlotCount = Math.max(0, 6 - room.players.length);
 
   return (
     <div className="room-container">
@@ -69,17 +69,17 @@ export default function WaitingRoom({
                   : '#222C3C'
               }}
             >
-              {p.isHost && <span className="host-badge">👑 방장</span>}
+              {p.isHost && <span className="host-badge">방장</span>}
 
-              {/* 방장에게만 보이는 다른 플레이어/봇 강퇴 버튼 */}
+              {/* 방장에게만 보이는 다른 플레이어/봇 내보내기 버튼 */}
               {isHost && p.id !== myId && (
                 <button
                   type="button"
                   className="btn-kick-player"
                   onClick={() => onKickPlayer && onKickPlayer(p.id)}
-                  title={`${p.nickname} 강퇴하기`}
+                  title={`${p.nickname} 내보내기`}
                 >
-                  ✕ 강퇴
+                  내보내기
                 </button>
               )}
 
@@ -94,16 +94,16 @@ export default function WaitingRoom({
                 <div
                   style={{
                     display: 'flex',
-                    gap: '4px',
-                    marginTop: '4px',
-                    justifyContent: 'center',
-                    flexWrap: 'wrap'
+                    gap: '8px',
+                    height: '28px',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}
                 >
                   {[
-                    { key: 'easy', label: '하(5초)' },
-                    { key: 'normal', label: '중(3초)' },
-                    { key: 'hard', label: '상(1.5초)' }
+                    { key: 'easy', label: '하' },
+                    { key: 'normal', label: '중' },
+                    { key: 'hard', label: '상' }
                   ].map((diff) => {
                     const currentDiff = p.difficulty || 'normal';
                     const active = currentDiff === diff.key;
@@ -116,13 +116,18 @@ export default function WaitingRoom({
                           onUpdateBotDifficulty && onUpdateBotDifficulty(p.id, diff.key)
                         }
                         style={{
-                          padding: '3px 7px',
-                          borderRadius: '6px',
+                          width: '28px',
+                          height: '28px',
+                          padding: 0,
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                           border: active ? '1.5px solid #f59e0b' : '1px solid #2B384E',
                           background: active ? 'rgba(245, 158, 11, 0.2)' : '#0D1117',
                           color: active ? '#fbbf24' : '#94a3b8',
-                          fontSize: '11px',
-                          fontWeight: 700,
+                          fontSize: '12px',
+                          fontWeight: 800,
                           cursor: isHost ? 'pointer' : 'default'
                         }}
                       >
@@ -134,6 +139,10 @@ export default function WaitingRoom({
               ) : (
                 <div
                   style={{
+                    height: '28px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     fontSize: '12px',
                     color: ready ? '#22c55e' : '#94a3b8',
                     fontWeight: 700
