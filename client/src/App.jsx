@@ -6,6 +6,7 @@ import {
   createRoomInFirebase,
   joinRoomInFirebase,
   addBotInFirebase,
+  updateBotDifficultyInFirebase,
   toggleReadyInFirebase,
   updateOptionsInFirebase,
   startGameInFirebase,
@@ -16,7 +17,8 @@ import {
   backToWaitingInFirebase,
   leaveOrKickPlayerInFirebase,
   cleanupStaleRoomsInFirebase,
-  syncLastHumanDisconnectHook
+  syncLastHumanDisconnectHook,
+  getRandomMasterWord
 } from './gameService';
 import LobbyView from './components/LobbyView';
 import WaitingRoom from './components/WaitingRoom';
@@ -156,6 +158,61 @@ export default function App() {
     myId
   ]);
 
+  // 대결 중 참가자에 봇이 포함되어 있으면 각 봇의 개별 난이도(하:5초 / 중:3초 / 상:1.5초)에 맞춰 자동 공격 실행
+  const duelSignature = room?.duelState ? JSON.stringify(room.duelState) : '';
+  useEffect(() => {
+    if (!room || room.status !== 'playing') return;
+    if (!room.duelState || room.voteState || room.badgeState) return;
+
+    const me = room.players.find((p) => p.id === myId && !p.isLeft);
+    if (!me?.isHost) return;
+
+    const participants = room.duelState.participants || [];
+    const botParticipants = room.players.filter(
+      (p) => p.isBot && !p.isLeft && participants.includes(p.id)
+    );
+    if (botParticipants.length === 0) return;
+
+    const difficultyMap = {
+      easy: 5000,
+      normal: 3000,
+      hard: 1500
+    };
+
+    const timers = botParticipants.map((bot) => {
+      const diffKey = bot.difficulty || 'normal';
+      const baseDelayMs = difficultyMap[diffKey] || 3000;
+      // 동일 난이도 봇끼리 붙었을 때 자연스럽게 승부가 갈리도록 미세한 편차(0~80ms) 부여
+      const jitterMs = Math.floor(Math.random() * 80);
+
+      return setTimeout(() => {
+        const opponents = room.duelState?.opponentMap?.[bot.id] || [];
+        if (opponents.length === 0) return;
+
+        const targetOpp = opponents[Math.floor(Math.random() * opponents.length)];
+        const answerWord = getRandomMasterWord(targetOpp.category);
+        if (!answerWord) return;
+
+        submitAnswerInFirebase(room.code, {
+          word: answerWord,
+          targetPlayerId: targetOpp.playerId,
+          overridePlayerId: bot.id
+        });
+      }, baseDelayMs + jitterMs);
+    });
+
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+    };
+  }, [
+    room?.code,
+    room?.status,
+    duelSignature,
+    room?.voteState,
+    room?.badgeState,
+    myId
+  ]);
+
   const handleCreateRoom = useCallback(async ({ nickname, penaltySeconds }) => {
     setErrorMsg('');
     try {
@@ -188,6 +245,14 @@ export default function App() {
     if (!activeRoomCode) return;
     addBotInFirebase(activeRoomCode);
   }, [activeRoomCode]);
+
+  const handleUpdateBotDifficulty = useCallback(
+    (botPlayerId, difficulty) => {
+      if (!activeRoomCode) return;
+      updateBotDifficultyInFirebase(activeRoomCode, botPlayerId, difficulty);
+    },
+    [activeRoomCode]
+  );
 
   const handleKickPlayer = useCallback(
     (targetPlayerId) => {
@@ -270,6 +335,7 @@ export default function App() {
           onKickPlayer={handleKickPlayer}
           onToggleReady={handleToggleReady}
           onUpdateOptions={handleUpdateOptions}
+          onUpdateBotDifficulty={handleUpdateBotDifficulty}
           onLeaveRoom={handleLeaveRoom}
         />
       ) : (

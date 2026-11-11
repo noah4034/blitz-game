@@ -59,6 +59,13 @@ export function getCategories() {
   return Object.keys(masterWordsJson);
 }
 
+export function getRandomMasterWord(category) {
+  const words = masterWordsJson[category];
+  if (!Array.isArray(words) || words.length === 0) return null;
+  const idx = Math.floor(Math.random() * words.length);
+  return words[idx];
+}
+
 export function isWordInMaster(category, rawWord) {
   const norm = normalizeWord(rawWord);
   if (!norm) return false;
@@ -264,6 +271,7 @@ export function formatRoomSnapshot(rawRoom) {
       nickname: p.nickname,
       isHost: !!p.isHost,
       isBot: !!p.isBot,
+      difficulty: p.isBot ? p.difficulty || 'normal' : null,
       isLeft: !!p.isLeft,
       isReady: !!(p.isHost || p.isBot || p.isReady),
       score: p.score || 0,
@@ -295,10 +303,15 @@ export function formatRoomSnapshot(rawRoom) {
     };
   }
 
+  const rawOptions = rawRoom.options || {};
   return {
     code: rawRoom.code,
     status: rawRoom.status || 'waiting',
-    options: rawRoom.options || { penaltySeconds: 1 },
+    options: {
+      penaltySeconds:
+        rawOptions.penaltySeconds !== undefined ? Number(rawOptions.penaltySeconds) : 1,
+      botDifficulty: rawOptions.botDifficulty || 'normal'
+    },
     deckCount: deck.length,
     activeWildCard: rawRoom.activeWildCard || null,
     turnIndex,
@@ -510,7 +523,7 @@ export async function leaveOrKickPlayerInFirebase(roomCode, targetPlayerId = nul
 }
 
 // 1. 방 만들기
-export async function createRoomInFirebase({ nickname, penaltySeconds = 1 }) {
+export async function createRoomInFirebase({ nickname, penaltySeconds = 1, botDifficulty = 'normal' }) {
   const myId = getMyPlayerId();
   const cleanName = (nickname || '플레이어1').trim().slice(0, 12);
   let code = generateRoomCode();
@@ -526,7 +539,8 @@ export async function createRoomInFirebase({ nickname, penaltySeconds = 1 }) {
     status: 'waiting',
     createdAt: Date.now(),
     options: {
-      penaltySeconds: Number(penaltySeconds) || 0
+      penaltySeconds: Number(penaltySeconds) || 0,
+      botDifficulty: botDifficulty || 'normal'
     },
     deck: [],
     activeWildCard: null,
@@ -637,12 +651,32 @@ export async function addBotInFirebase(roomCode) {
       nickname: botName,
       isHost: false,
       isBot: true,
+      difficulty: 'normal',
       isLeft: false,
       isReady: true,
       score: 0,
       pile: [],
       cooldownUntil: 0
     });
+    room.players = players;
+    return room;
+  });
+}
+
+// 3-1. 개별 봇 난이도 변경 (하: easy / 중: normal / 상: hard)
+export async function updateBotDifficultyInFirebase(roomCode, botPlayerId, difficulty) {
+  const myId = getMyPlayerId();
+  const roomRef = ref(db, `rooms/${roomCode}`);
+  await runTransaction(roomRef, (room) => {
+    if (!room || room.status !== 'waiting') return room;
+    const players = room.players || [];
+    const me = players.find((p) => p.id === myId);
+    if (!me || !me.isHost) return room;
+
+    const targetBot = players.find((p) => p.id === botPlayerId && p.isBot);
+    if (!targetBot) return room;
+
+    targetBot.difficulty = difficulty || 'normal';
     room.players = players;
     return room;
   });
@@ -664,7 +698,7 @@ export async function toggleReadyInFirebase(roomCode) {
 }
 
 // 5. 방 옵션 변경
-export async function updateOptionsInFirebase(roomCode, { penaltySeconds }) {
+export async function updateOptionsInFirebase(roomCode, newOptions = {}) {
   const myId = getMyPlayerId();
   const roomRef = ref(db, `rooms/${roomCode}`);
   await runTransaction(roomRef, (room) => {
@@ -672,7 +706,14 @@ export async function updateOptionsInFirebase(roomCode, { penaltySeconds }) {
     const players = room.players || [];
     const me = players.find((p) => p.id === myId);
     if (!me || !me.isHost) return room;
-    room.options = { penaltySeconds: Number(penaltySeconds) || 0 };
+    const currentOpts = room.options || { penaltySeconds: 1, botDifficulty: 'normal' };
+    room.options = {
+      penaltySeconds:
+        newOptions.penaltySeconds !== undefined
+          ? Number(newOptions.penaltySeconds) || 0
+          : Number(currentOpts.penaltySeconds) || 0,
+      botDifficulty: newOptions.botDifficulty || currentOpts.botDifficulty || 'normal'
+    };
     return room;
   });
 }
@@ -830,9 +871,12 @@ export async function completeBadgePhaseInFirebase(roomCode, expectedBadgeId) {
   });
 }
 
-// 8. 대결 정답 제출
-export async function submitAnswerInFirebase(roomCode, { word, targetPlayerId }) {
-  const myId = getMyPlayerId();
+// 8. 대결 정답 제출 (인간 플레이어 또는 봇 공격 공통)
+export async function submitAnswerInFirebase(
+  roomCode,
+  { word, targetPlayerId, overridePlayerId = null }
+) {
+  const actorId = overridePlayerId || getMyPlayerId();
   const cleanWord = (word || '').trim();
   if (!cleanWord) return;
 
@@ -844,21 +888,28 @@ export async function submitAnswerInFirebase(roomCode, { word, targetPlayerId })
     if (!room.duelState || room.voteState || room.badgeState) return room;
 
     const participants = room.duelState.participants || [];
-    if (!participants.includes(myId)) return room;
+    if (!participants.includes(actorId)) return room;
 
     const players = room.players || [];
-    const submitter = players.find((p) => p.id === myId && !p.isLeft);
+    const submitter = players.find((p) => p.id === actorId && !p.isLeft);
     if (!submitter) return room;
 
     if (submitter.cooldownUntil && Date.now() < submitter.cooldownUntil) {
       return room;
     }
 
-    const opponents = room.duelState.opponentMap?.[myId] || [];
+    const opponents = room.duelState.opponentMap?.[actorId] || [];
     if (opponents.length === 0) return room;
 
     // 1단계: 공식 사전(words_master + Firebase promoted)에 있는 단어인지 즉시 확인
-    for (const opp of opponents) {
+    const orderedOpponents = targetPlayerId
+      ? [
+          ...opponents.filter((o) => o.playerId === targetPlayerId),
+          ...opponents.filter((o) => o.playerId !== targetPlayerId)
+        ]
+      : opponents;
+
+    for (const opp of orderedOpponents) {
       if (isWordInMaster(opp.category, cleanWord)) {
         const loser = players.find((p) => p.id === opp.playerId);
         let capturedCard = null;

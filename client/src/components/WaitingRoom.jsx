@@ -10,6 +10,7 @@ export default function WaitingRoom({
   onKickPlayer,
   onToggleReady,
   onUpdateOptions,
+  onUpdateBotDifficulty,
   onLeaveRoom
 }) {
   const [copied, setCopied] = useState(false);
@@ -88,15 +89,59 @@ export default function WaitingRoom({
               <div style={{ fontWeight: 800, fontSize: '15px' }}>
                 {p.nickname} {p.id === myId ? '(나)' : ''}
               </div>
-              <div
-                style={{
-                  fontSize: '12px',
-                  color: ready ? '#22c55e' : '#94a3b8',
-                  fontWeight: 700
-                }}
-              >
-                {p.isHost ? '방장 (대기중)' : ready ? '✓ 준비완료' : '준비 대기중...'}
-              </div>
+
+              {p.isBot ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '4px',
+                    marginTop: '4px',
+                    justifyContent: 'center',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  {[
+                    { key: 'easy', label: '하(5초)' },
+                    { key: 'normal', label: '중(3초)' },
+                    { key: 'hard', label: '상(1.5초)' }
+                  ].map((diff) => {
+                    const currentDiff = p.difficulty || 'normal';
+                    const active = currentDiff === diff.key;
+                    return (
+                      <button
+                        key={diff.key}
+                        type="button"
+                        disabled={!isHost}
+                        onClick={() =>
+                          onUpdateBotDifficulty && onUpdateBotDifficulty(p.id, diff.key)
+                        }
+                        style={{
+                          padding: '3px 7px',
+                          borderRadius: '6px',
+                          border: active ? '1.5px solid #f59e0b' : '1px solid #2B384E',
+                          background: active ? 'rgba(245, 158, 11, 0.2)' : '#0D1117',
+                          color: active ? '#fbbf24' : '#94a3b8',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          cursor: isHost ? 'pointer' : 'default'
+                        }}
+                      >
+                        {diff.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: '12px',
+                    color: ready ? '#22c55e' : '#94a3b8',
+                    fontWeight: 700
+                  }}
+                >
+                  {p.isHost ? '방장 (대기중)' : ready ? '✓ 준비완료' : '준비 대기중...'}
+                </div>
+              )}
             </div>
           );
         })}

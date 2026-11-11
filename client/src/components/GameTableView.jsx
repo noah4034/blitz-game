@@ -287,6 +287,13 @@ export default function GameTableView({
           isDuelActive && room.duelState.participants.includes(player.id);
         const isTurn = room.currentTurnPlayerId === player.id;
         const isTopSeat = pos.startsWith('seat-top');
+        const diffLabel = player.isBot
+          ? player.difficulty === 'hard'
+            ? '(상)'
+            : player.difficulty === 'easy'
+            ? '(하)'
+            : '(중)'
+          : '';
 
         return (
           <div
@@ -304,7 +311,7 @@ export default function GameTableView({
                 }`}
               >
                 <span>
-                  {player.nickname} {player.id === myId ? '(나)' : ''}
+                  {player.nickname} {diffLabel} {player.id === myId ? '(나)' : ''}
                 </span>
                 <span className="seat-score">★ {player.score}장</span>
               </div>
@@ -325,7 +332,7 @@ export default function GameTableView({
                 }`}
               >
                 <span>
-                  {player.nickname} {player.id === myId ? '(나)' : ''}
+                  {player.nickname} {diffLabel} {player.id === myId ? '(나)' : ''}
                 </span>
                 <span className="seat-score">★ {player.score}장</span>
               </div>
