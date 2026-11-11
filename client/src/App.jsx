@@ -30,7 +30,6 @@ export default function App() {
   const [rawRoom, setRawRoom] = useState(null);
   const [room, setRoom] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [showBackModal, setShowBackModal] = useState(false);
 
   // 로비 진입 시 DB에 남아있는 유령 방(접속자 0명 방) 자동 청소
   useEffect(() => {
@@ -104,25 +103,31 @@ export default function App() {
     };
   }, [activeRoomCode, myId]);
 
-  // 브라우저 '뒤로 가기' 버튼 클릭 시 즉시 이탈하지 않고 경고 모달(나가기 / 돌아가기) 표시
+  // 브라우저 '뒤로 가기' 버튼 클릭 시 브라우저 기본 경고창(confirm) 표시
   useEffect(() => {
-    if (!activeRoomCode) {
-      setShowBackModal(false);
-      return;
-    }
+    if (!activeRoomCode) return;
 
     window.history.pushState({ inBlitzRoom: true }, '');
 
     const handlePopState = () => {
-      window.history.pushState({ inBlitzRoom: true }, '');
-      setShowBackModal(true);
+      const shouldLeave = window.confirm(
+        '현재 방에서 나가 초기 화면으로 이동하시겠습니까?'
+      );
+      if (shouldLeave) {
+        const codeToLeave = activeRoomCode;
+        setActiveRoomCode(null);
+        window.history.replaceState({}, '', '/');
+        leaveOrKickPlayerInFirebase(codeToLeave, myId);
+      } else {
+        window.history.pushState({ inBlitzRoom: true }, '');
+      }
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [activeRoomCode]);
+  }, [activeRoomCode, myId]);
 
   // 5초 투표 타이머 실시간 카운트다운 및 만료 시 자동 집계
   useEffect(() => {
@@ -332,7 +337,6 @@ export default function App() {
 
   const handleLeaveRoom = useCallback(async () => {
     const codeToLeave = activeRoomCode;
-    setShowBackModal(false);
     setActiveRoomCode(null);
     window.history.replaceState({}, '', '/');
     if (codeToLeave) {
@@ -370,44 +374,6 @@ export default function App() {
           onPlayAgain={handlePlayAgain}
           onLeaveRoom={handleLeaveRoom}
         />
-      )}
-
-      {/* 브라우저 '뒤로 가기' 경고 모달 */}
-      {showBackModal && room && (
-        <div className="modal-backdrop">
-          <div className="leave-confirm-modal">
-            <div className="leave-confirm-title">⚠️ 방 나가기 안내</div>
-            <p className="leave-confirm-desc">
-              {room.status === 'playing' ? (
-                <>
-                  지금 나가면 <strong>점수가 모두 삭제</strong>되고 초기 화면으로 돌아갑니다.
-                  <br />
-                  정말 나가시겠습니까?
-                </>
-              ) : (
-                <>
-                  현재 방에서 나가 <strong>초기 화면</strong>으로 이동하시겠습니까?
-                </>
-              )}
-            </p>
-            <div className="leave-confirm-actions">
-              <button
-                type="button"
-                className="btn-confirm-yes"
-                onClick={handleLeaveRoom}
-              >
-                나가기
-              </button>
-              <button
-                type="button"
-                className="btn-confirm-no"
-                onClick={() => setShowBackModal(false)}
-              >
-                돌아가기
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
