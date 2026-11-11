@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 
 export default function LobbyView({ onCreateRoom, onJoinRoom, errorMsg }) {
   const [nickname, setNickname] = useState('');
-  const [penaltySeconds, setPenaltySeconds] = useState(1);
   const [roomCode, setRoomCode] = useState('');
 
   useEffect(() => {
@@ -15,7 +14,7 @@ export default function LobbyView({ onCreateRoom, onJoinRoom, errorMsg }) {
 
   const handleCreate = (e) => {
     e.preventDefault();
-    onCreateRoom({ nickname: nickname.trim() || '플레이어1', penaltySeconds });
+    onCreateRoom({ nickname: nickname.trim() || '플레이어1', penaltySeconds: 1 });
   };
 
   const handleJoin = (e) => {
@@ -42,22 +41,6 @@ export default function LobbyView({ onCreateRoom, onJoinRoom, errorMsg }) {
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
         />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">오답(노인정) 타이밍 페널티 설정</label>
-        <div className="penalty-selector">
-          {[0, 1, 2, 3].map((sec) => (
-            <button
-              key={sec}
-              type="button"
-              className={`penalty-option-btn ${penaltySeconds === sec ? 'active' : ''}`}
-              onClick={() => setPenaltySeconds(sec)}
-            >
-              {sec === 0 ? '없음' : `${sec}초 잠금`}
-            </button>
-          ))}
-        </div>
       </div>
 
       <button type="button" className="btn btn-primary" onClick={handleCreate}>
