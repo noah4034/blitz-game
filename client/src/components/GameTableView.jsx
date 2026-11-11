@@ -268,7 +268,7 @@ export default function GameTableView({
           )}
         </div>
 
-        {/* 중앙 와일드카드 슬롯 */}
+        {/* 와일드카드 슬롯 */}
         <div className="deck-area">
           <BlitzCard
             card={room.activeWildCard}
@@ -276,7 +276,7 @@ export default function GameTableView({
             emptyLabel="와일드카드 슬롯"
           />
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
-            중앙 와일드카드
+            와일드카드
           </div>
         </div>
       </div>
