@@ -273,7 +273,6 @@ export default function GameTableView({
           <BlitzCard
             card={room.activeWildCard}
             orientation="vertical"
-            emptyLabel="와일드카드 슬롯"
           />
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
             와일드카드
@@ -321,7 +320,6 @@ export default function GameTableView({
               card={player.topCard}
               orientation={orientation}
               isGlowing={isParticipant}
-              emptyLabel="카드 대기중"
             />
 
             {/* 하단 및 좌/우 좌석은 이름표를 카드 아래에 배치 */}

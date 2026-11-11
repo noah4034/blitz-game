@@ -12,19 +12,14 @@ const COLOR_HEX_MAP = {
 export default function BlitzCard({
   card,
   orientation = 'vertical', // 'vertical' | 'horizontal'
-  isGlowing = false,
-  emptyLabel = '카드 없음'
+  isGlowing = false
 }) {
   const sizeClass = orientation === 'horizontal' ? 'card-horizontal' : 'card-vertical';
   const glowClass = isGlowing ? 'card-glow' : '';
 
-  // 카드가 아직 없을 때 빈 슬롯 표시
+  // 카드가 아직 없을 때 빈 슬롯 테두리만 표시
   if (!card) {
-    return (
-      <div className={`blitz-card ${sizeClass} card-empty-slot`}>
-        <span>{emptyLabel}</span>
-      </div>
-    );
+    return <div className={`blitz-card ${sizeClass} card-empty-slot`} />;
   }
 
   // 2색 연결 와일드카드
