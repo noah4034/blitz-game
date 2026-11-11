@@ -14,7 +14,9 @@ import {
   castVoteInFirebase,
   finalizeVoteInFirebase,
   backToWaitingInFirebase,
-  leaveOrKickPlayerInFirebase
+  leaveOrKickPlayerInFirebase,
+  cleanupStaleRoomsInFirebase,
+  syncLastHumanDisconnectHook
 } from './gameService';
 import LobbyView from './components/LobbyView';
 import WaitingRoom from './components/WaitingRoom';
@@ -26,6 +28,13 @@ export default function App() {
   const [rawRoom, setRawRoom] = useState(null);
   const [room, setRoom] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // 로비 진입 시 DB에 남아있는 유령 방(접속자 0명 방) 자동 청소
+  useEffect(() => {
+    if (!activeRoomCode) {
+      cleanupStaleRoomsInFirebase();
+    }
+  }, [activeRoomCode]);
 
   // Firebase 실시간 방 구독 및 강퇴/연결 끊김 감지
   useEffect(() => {
@@ -55,6 +64,11 @@ export default function App() {
         setRoom(null);
         return;
       }
+
+      // 방에 남은 인간 플레이어가 나 혼자뿐이라면 탭 종료 시 Firebase 서버가 방 통째로 삭제하도록 설정
+      const activeHumans = players.filter((p) => !p.isBot && !p.isLeft);
+      const isOnlyHuman = activeHumans.length === 1 && activeHumans[0].id === myId;
+      syncLastHumanDisconnectHook(data.code, isOnlyHuman);
 
       // 다른 플레이어가 탭/창을 닫아 presence가 끊긴 경우 즉시 퇴장 처리
       const presence = data.presence || {};

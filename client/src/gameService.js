@@ -339,6 +339,61 @@ export async function registerPresenceInFirebase(roomCode) {
 }
 
 /**
+ * 방에 남아있는 인간 플레이어가 나 1명뿐일 때 탭을 닫으면
+ * Firebase 서버가 방 전체(rooms/{roomCode})를 즉시 삭제하도록 onDisconnect 연동
+ */
+export async function syncLastHumanDisconnectHook(roomCode, isOnlyHuman) {
+  if (!roomCode) return;
+  const roomRef = ref(db, `rooms/${roomCode}`);
+  try {
+    if (isOnlyHuman) {
+      await onDisconnect(roomRef).remove();
+    } else {
+      await onDisconnect(roomRef).cancel();
+    }
+  } catch (err) {
+    console.error('Room onDisconnect sync error:', err);
+  }
+}
+
+/**
+ * 접속자(presence)가 0명이거나 방치된 유령 방들을 DB에서 자동으로 스캔하여 삭제 (Garbage Collection)
+ */
+export async function cleanupStaleRoomsInFirebase() {
+  try {
+    const roomsRef = ref(db, 'rooms');
+    const snap = await get(roomsRef);
+    if (!snap.exists()) return;
+
+    const allRooms = snap.val() || {};
+    const now = Date.now();
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+
+    for (const [code, room] of Object.entries(allRooms)) {
+      if (!room) continue;
+      const createdAt = room.createdAt || 0;
+      const ageMs = now - createdAt;
+      const presenceCount = Object.keys(room.presence || {}).length;
+      const players = room.players || [];
+      const activeHumans = players.filter((p) => !p.isBot && !p.isLeft);
+
+      // 1) 생성 후 10초가 지났는데 현재 접속 중인 사람(presence)이 0명인 방
+      // 2) 활성 인간 플레이어가 0명인 방
+      // 3) 생성된 지 6시간이 넘은 방
+      if (
+        (ageMs > 10000 && presenceCount === 0) ||
+        activeHumans.length === 0 ||
+        ageMs > SIX_HOURS
+      ) {
+        await remove(ref(db, `rooms/${code}`));
+      }
+    }
+  } catch (err) {
+    console.error('Stale room cleanup error:', err);
+  }
+}
+
+/**
  * 방 나가기 / 강퇴 / 탭 닫기(이탈) 통합 처리
  * - 대기실(waiting)에서는 목록에서 즉시 제거
  * - 게임 중(playing)에는 점수를 0으로 초기화하고 isLeft: true로 마킹하여
@@ -352,6 +407,10 @@ export async function leaveOrKickPlayerInFirebase(roomCode, targetPlayerId = nul
   const presenceRef = ref(db, `rooms/${roomCode}/presence/${targetId}`);
 
   try {
+    if (targetId === getMyPlayerId()) {
+      await onDisconnect(roomRef).cancel();
+      await onDisconnect(presenceRef).cancel();
+    }
     await remove(presenceRef);
   } catch (_) {}
 
