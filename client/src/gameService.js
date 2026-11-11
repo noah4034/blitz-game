@@ -323,7 +323,8 @@ export function formatRoomSnapshot(rawRoom) {
     presence: rawRoom.presence || {},
     duelState: rawRoom.duelState || null,
     voteState: formattedVote,
-    badgeState: rawRoom.badgeState || null
+    badgeState: rawRoom.badgeState || null,
+    lastDraw: rawRoom.lastDraw || null
   };
 }
 
@@ -749,6 +750,7 @@ export async function startGameInFirebase(roomCode) {
     room.duelState = null;
     room.voteState = null;
     room.badgeState = null;
+    room.lastDraw = null;
     room.status = 'playing';
 
     room.players = players.map((p) => ({
@@ -790,8 +792,16 @@ export async function drawCardInFirebase(roomCode, overridePlayerId = null) {
     room.deck = deck;
 
     if (drawnCard.type === 'wild') {
+      const prevWildCard = room.activeWildCard || null;
       room.activeWildCard = drawnCard;
       room.needsExtraDraw = true;
+      room.lastDraw = {
+        id: drawnCard.id,
+        card: drawnCard,
+        targetType: 'wild',
+        targetPlayerId: currentPlayer.id,
+        prevCard: prevWildCard
+      };
 
       const immediateDuel = scanTableForDuels(players, room.activeWildCard);
       if (immediateDuel) {
@@ -803,9 +813,20 @@ export async function drawCardInFirebase(roomCode, overridePlayerId = null) {
     }
 
     if (!Array.isArray(currentPlayer.pile)) currentPlayer.pile = [];
+    const prevTopCard =
+      currentPlayer.pile.length > 0
+        ? currentPlayer.pile[currentPlayer.pile.length - 1]
+        : null;
     currentPlayer.pile.push(drawnCard);
     room.players = players;
     room.needsExtraDraw = false;
+    room.lastDraw = {
+      id: drawnCard.id,
+      card: drawnCard,
+      targetType: 'player',
+      targetPlayerId: currentPlayer.id,
+      prevCard: prevTopCard
+    };
 
     const duel = scanTableForDuels(players, room.activeWildCard);
     if (duel) {
@@ -1073,6 +1094,7 @@ export async function backToWaitingInFirebase(roomCode) {
     room.duelState = null;
     room.voteState = null;
     room.badgeState = null;
+    room.lastDraw = null;
     room.activeWildCard = null;
     room.turnIndex = 0;
     room.players = (room.players || [])

@@ -72,10 +72,15 @@ export default function GameTableView({
   const [selectedTargetId, setSelectedTargetId] = useState(null);
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [flyingCardAnim, setFlyingCardAnim] = useState(null);
+  const [drawCardAnim, setDrawCardAnim] = useState(null);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const inputRef = useRef(null);
   const tableRef = useRef(null);
+  const deckRef = useRef(null);
+  const wildSlotRef = useRef(null);
   const seatRefs = useRef({});
+  const seatCardRefs = useRef({});
+  const lastDrawIdRef = useRef(room.lastDraw?.id || null);
 
   const isMyTurn = room.currentTurnPlayerId === myId;
   const currentTurnPlayer = room.players.find(
@@ -88,6 +93,7 @@ export default function GameTableView({
     isDuelActive && room.duelState.participants.includes(myId);
   const myOpponents =
     (amIInDuel && room.duelState.opponentMap?.[myId]) || [];
+  const duelSignature = room.duelState ? JSON.stringify(room.duelState) : '';
 
   // 대결 상대 선택 기본값 유지
   useEffect(() => {
@@ -100,14 +106,80 @@ export default function GameTableView({
     }
   }, [room.duelState, myId]);
 
-  // 대결 시작 또는 노인정 후 재개 시 입력창 자동 포커스
+  // 대결 시작, 연쇄 대결 전환, 투표/배지 전환 시마다 입력창을 항상 빈칸으로 초기화 후 자동 포커스
   useEffect(() => {
+    setAnswerText('');
     if (amIInDuel && !room.voteState && !room.badgeState) {
       setTimeout(() => {
         inputRef.current?.focus();
       }, 30);
     }
-  }, [amIInDuel, room.voteState, room.badgeState]);
+  }, [amIInDuel, duelSignature, room.voteState?.id, room.badgeState?.id]);
+
+  // 덱에서 플레이어 더미 또는 와일드카드 더미로 카드가 이동하는 애니메이션
+  useEffect(() => {
+    const ld = room.lastDraw;
+    if (!ld || !ld.id) {
+      lastDrawIdRef.current = null;
+      setDrawCardAnim(null);
+      return;
+    }
+
+    if (lastDrawIdRef.current === ld.id) return;
+    lastDrawIdRef.current = ld.id;
+
+    const tableEl = tableRef.current;
+    const deckEl = deckRef.current;
+    const targetEl =
+      ld.targetType === 'wild'
+        ? wildSlotRef.current
+        : seatCardRefs.current[ld.targetPlayerId] || seatRefs.current[ld.targetPlayerId];
+
+    if (!tableEl || !deckEl || !targetEl) return;
+
+    const tableRect = tableEl.getBoundingClientRect();
+    const deckRect = deckEl.getBoundingClientRect();
+    const targetRect = targetEl.getBoundingClientRect();
+
+    const startX = deckRect.left - tableRect.left + deckRect.width / 2;
+    const startY = deckRect.top - tableRect.top + deckRect.height / 2;
+    const endX = targetRect.left - tableRect.left + targetRect.width / 2;
+    const endY = targetRect.top - tableRect.top + targetRect.height / 2;
+
+    const currentSeats = getSeatLayout(room.players, myId);
+    const targetSeat = currentSeats.find((s) => s.player.id === ld.targetPlayerId);
+    const orientation =
+      ld.targetType === 'wild' ? 'vertical' : targetSeat?.orientation || 'vertical';
+
+    setDrawCardAnim({
+      id: ld.id,
+      card: ld.card,
+      targetType: ld.targetType,
+      targetPlayerId: ld.targetPlayerId,
+      prevCard: ld.prevCard || null,
+      orientation,
+      startX,
+      startY,
+      endX,
+      endY,
+      phase: 'start'
+    });
+
+    const rafId = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setDrawCardAnim((prev) => (prev ? { ...prev, phase: 'moving' } : null));
+      });
+    });
+
+    const clearTimer = setTimeout(() => {
+      setDrawCardAnim((prev) => (prev?.id === ld.id ? null : prev));
+    }, 380);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(clearTimer);
+    };
+  }, [room.lastDraw?.id, myId]);
 
   // 대결 승리 시 상대방 카드가 승자(내 쪽)로 축소되며 날아오는 애니메이션 실행
   useEffect(() => {
@@ -232,6 +304,7 @@ export default function GameTableView({
       <div className="center-table-zone">
         <div className="deck-area">
           <div
+            ref={deckRef}
             className={`blitz-card card-vertical card-back ${
               isMyTurn && !isDuelActive ? 'my-turn' : ''
             }`}
@@ -270,10 +343,16 @@ export default function GameTableView({
 
         {/* 와일드카드 슬롯 */}
         <div className="deck-area">
-          <BlitzCard
-            card={room.activeWildCard}
-            orientation="vertical"
-          />
+          <div ref={wildSlotRef}>
+            <BlitzCard
+              card={
+                drawCardAnim?.targetType === 'wild'
+                  ? drawCardAnim.prevCard
+                  : room.activeWildCard
+              }
+              orientation="vertical"
+            />
+          </div>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
             와일드카드
           </div>
@@ -293,6 +372,10 @@ export default function GameTableView({
             ? '(하)'
             : '(중)'
           : '';
+        const isReceivingDraw =
+          drawCardAnim?.targetType === 'player' &&
+          drawCardAnim?.targetPlayerId === player.id;
+        const displayedCard = isReceivingDraw ? drawCardAnim.prevCard : player.topCard;
 
         return (
           <div
@@ -316,11 +399,17 @@ export default function GameTableView({
               </div>
             )}
 
-            <BlitzCard
-              card={player.topCard}
-              orientation={orientation}
-              isGlowing={isParticipant}
-            />
+            <div
+              ref={(el) => {
+                seatCardRefs.current[player.id] = el;
+              }}
+            >
+              <BlitzCard
+                card={displayedCard}
+                orientation={orientation}
+                isGlowing={isParticipant && !isReceivingDraw}
+              />
+            </div>
 
             {/* 하단 및 좌/우 좌석은 이름표를 카드 아래에 배치 */}
             {!isTopSeat && (
@@ -338,6 +427,34 @@ export default function GameTableView({
           </div>
         );
       })}
+
+      {/* 덱에서 플레이어 더미 / 와일드카드 더미로 이동하는 카드 뽑기 애니메이션 */}
+      {drawCardAnim && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            pointerEvents: 'none',
+            zIndex: 440,
+            transform:
+              drawCardAnim.phase === 'moving'
+                ? `translate(${drawCardAnim.endX}px, ${drawCardAnim.endY}px) translate(-50%, -50%) scale(1)`
+                : `translate(${drawCardAnim.startX}px, ${drawCardAnim.startY}px) translate(-50%, -50%) scale(0.85)`,
+            opacity: 1,
+            transition:
+              drawCardAnim.phase === 'moving'
+                ? 'transform 0.36s cubic-bezier(0.22, 1, 0.36, 1)'
+                : 'none'
+          }}
+        >
+          <BlitzCard
+            card={drawCardAnim.card}
+            orientation={drawCardAnim.orientation}
+            isGlowing={false}
+          />
+        </div>
+      )}
 
       {/* 대결 승리 시 패자의 카드가 승자 쪽으로 축소되며 흡수되는 애니메이션 */}
       {flyingCardAnim && (
